@@ -51,6 +51,56 @@ class CompanyDatabase:
             print(f"❌ Kunde inte ansluta till databas: {e}")
             return False
     
+    def suggest_types(self, prefix: str = "", limit: int = 25) -> List[str]:
+        """Hämta distinkta företagstyper för autocomplete"""
+        if not self.conn:
+            return []
+        cursor = self.conn.cursor()
+        if prefix:
+            cursor.execute(
+                """
+                SELECT DISTINCT type FROM companies
+                WHERE type IS NOT NULL AND LOWER(type) LIKE LOWER(?)
+                ORDER BY type LIMIT ?
+                """,
+                (f"{prefix}%", limit),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT DISTINCT type FROM companies
+                WHERE type IS NOT NULL
+                ORDER BY type LIMIT ?
+                """,
+                (limit,),
+            )
+        return [row[0] for row in cursor.fetchall() if row[0]]
+
+    def suggest_cities(self, prefix: str = "", limit: int = 25) -> List[str]:
+        """Hämta distinkta städer för autocomplete"""
+        if not self.conn:
+            return []
+        cursor = self.conn.cursor()
+        if prefix:
+            cursor.execute(
+                """
+                SELECT DISTINCT location_city FROM companies
+                WHERE location_city IS NOT NULL AND LOWER(location_city) LIKE LOWER(?)
+                ORDER BY location_city LIMIT ?
+                """,
+                (f"{prefix}%", limit),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT DISTINCT location_city FROM companies
+                WHERE location_city IS NOT NULL
+                ORDER BY location_city LIMIT ?
+                """,
+                (limit,),
+            )
+        return [row[0] for row in cursor.fetchall() if row[0]]
+
     def close(self):
         """Stäng databas-anslutning"""
         if self.conn:
@@ -110,6 +160,50 @@ class CompanyDatabase:
             }
         
         return None
+
+    def get_random_company_strict(self) -> Optional[Dict]:
+        """Slumpa ett företag som uppfyller minimikraven för daglig post"""
+        if not self.conn:
+            return None
+        cursor = self.conn.cursor()
+        query = """
+        SELECT id, name, website, type, logo_url, description, 
+               location_city, location_greater_stockholm
+        FROM companies
+        WHERE type IN ('corporation','startup','supplier')
+          AND website IS NOT NULL AND TRIM(website) <> ''
+          AND logo_url IS NOT NULL AND TRIM(logo_url) <> ''
+          AND description IS NOT NULL AND TRIM(description) <> ''
+        ORDER BY RANDOM()
+        LIMIT 1
+        """
+        cursor.execute(query)
+        result = cursor.fetchone()
+        if result:
+            company_id = result['id']
+            cursor.execute(
+                """
+                SELECT ac.name 
+                FROM ai_capabilities ac
+                JOIN company_ai_capabilities cac ON ac.id = cac.capability_id
+                WHERE cac.company_id = ?
+                LIMIT 5
+                """,
+                (company_id,),
+            )
+            ai_capabilities = [row['name'] for row in cursor.fetchall()]
+            return {
+                'id': result['id'],
+                'name': result['name'],
+                'website': result['website'],
+                'type': result['type'],
+                'logo_url': result['logo_url'],
+                'description': result['description'],
+                'location_city': result['location_city'],
+                'location_greater_stockholm': result['location_greater_stockholm'],
+                'ai_capabilities': ai_capabilities
+            }
+        return None
     
     def search_by_name(self, search_term: str, limit: int = 5) -> List[Dict]:
         """Sök företag efter namn"""
@@ -151,7 +245,7 @@ class CompanyDatabase:
         SELECT id, name, website, type, location_city
         FROM companies
         WHERE LOWER(type) = LOWER(?)
-        ORDER BY name
+        ORDER BY RANDOM()
         LIMIT ?
         """
         
@@ -290,6 +384,56 @@ async def on_command_error(ctx, error):
         print(f"Fel: {error}")
         traceback.print_exception(type(error), error, error.__traceback__)
 
+
+# ==================== UI HELPERS (PAGINERING) ====================
+class PagedResultsView(discord.ui.View):
+    def __init__(self, pages: List[List[Dict]], title: str, make_field_line, user_id: int, color: discord.Color = discord.Color.blurple()):
+        super().__init__(timeout=120)
+        self.pages = pages
+        self.index = 0
+        self.title = title
+        self.make_field_line = make_field_line
+        self.user_id = user_id
+        self.color = color
+
+    def _embed_for_page(self):
+        embed = discord.Embed(title=self.title, description=f"Sida {self.index+1}/{len(self.pages)}", color=self.color)
+        for company in self.pages[self.index]:
+            name = company['name'] + (f" - {company['location_city']}" if company.get('location_city') else "")
+            url = company['website'] or "(saknar hemsida)"
+            value = self.make_field_line(company, url)
+            embed.add_field(name=name, value=value, inline=False)
+        return embed
+
+    async def update_message(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(embed=self._embed_for_page(), view=self)
+
+    @discord.ui.button(label="◀ Föregående", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Endast den som startade kommandot kan bläddra.", ephemeral=True)
+            return
+        if self.index > 0:
+            self.index -= 1
+            await self.update_message(interaction)
+        else:
+            await interaction.response.defer()
+
+    @discord.ui.button(label="Nästa ▶", style=discord.ButtonStyle.primary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Endast den som startade kommandot kan bläddra.", ephemeral=True)
+            return
+        if self.index < len(self.pages) - 1:
+            self.index += 1
+            await self.update_message(interaction)
+        else:
+            await interaction.response.defer()
+
+
+def chunk_list(items: List[Dict], size: int) -> List[List[Dict]]:
+    return [items[i:i+size] for i in range(0, len(items), size)]
+
 # ==================== BOT-KOMMANDON ====================
 
 
@@ -328,7 +472,7 @@ async def help_command(interaction: discord.Interaction):
 
 @bot.tree.command(name="dagens", description="Visa ett slumpmässigt praktik-relevant företag")
 async def dagens(interaction: discord.Interaction):
-    company = db.get_random_company(only_praktik_relevant=True)
+    company = db.get_random_company_strict()
     if not company:
         await interaction.response.send_message("❌ Kunde inte hitta något företag. Kolla att databasen finns!", ephemeral=True)
         return
@@ -373,7 +517,7 @@ async def sok(interaction: discord.Interaction, search_term: str):
     for i, company in enumerate(results, 1):
         location = f" - {company['location_city']}" if company.get('location_city') else ""
         website = company['website'] if company['website'] else "(saknar hemsida)"
-        value = f"[{website}]({website}){location}\nTyp: {company['type']}" if company['website'] else f"{website}{location}\nTyp: {company['type']}"
+        value = f"{website}{location}\nTyp: {company['type']}"
         embed.add_field(name=f"{i}. {company['name']}", value=value, inline=False)
 
     await interaction.response.send_message(embed=embed)
@@ -381,30 +525,28 @@ async def sok(interaction: discord.Interaction, search_term: str):
 
 @bot.tree.command(name="typ", description="Filtrera företag på typ (startup, corporation, supplier)")
 @app_commands.describe(company_type="t.ex. 'startup', 'corporation', 'supplier'")
+@app_commands.autocomplete(company_type=lambda interaction, current: [app_commands.Choice(name=t, value=t) for t in db.suggest_types(current)][:25])
 async def typ(interaction: discord.Interaction, company_type: str):
-    results = db.filter_by_type(company_type)
+    # Hämta fler för paginering
+    results = db.filter_by_type(company_type, limit=100)
     if not results:
         await interaction.response.send_message(f"❌ Hittade inga företag av typ '{company_type}'\n💡 Prova: startup, corporation, supplier", ephemeral=True)
         return
 
-    embed = discord.Embed(
-        title=f"🏢 {company_type.capitalize()}",
-        description=f"Visar {len(results)} företag",
-        color=discord.Color.purple()
-    )
-    for company in results:
-        location = f" - {company['location_city']}" if company.get('location_city') else ""
-        website = company['website'] if company['website'] else "(saknar hemsida)"
-        value = f"[{website}]({website})" if company['website'] else website
-        embed.add_field(name=company['name'] + location, value=value, inline=False)
+    pages = chunk_list(results, 5)
 
-    await interaction.response.send_message(embed=embed)
+    def make_line(c, url):
+        return f"{url}\nTyp: {c['type']}"
+
+    view = PagedResultsView(pages, title=f"🏢 {company_type.capitalize()}", make_field_line=make_line, user_id=interaction.user.id, color=discord.Color.purple())
+    await interaction.response.send_message(embed=view._embed_for_page(), view=view)
 
 
 @bot.tree.command(name="stad", description="Hitta praktik-relevanta företag i en stad")
 @app_commands.describe(city="t.ex. 'Stockholm'")
+@app_commands.autocomplete(city=lambda interaction, current: [app_commands.Choice(name=c, value=c) for c in db.suggest_cities(current)][:25])
 async def stad(interaction: discord.Interaction, city: str):
-    results = db.filter_by_city(city)
+    results = db.filter_by_city(city, limit=100)
     if not results:
         await interaction.response.send_message(
             f"❌ Hittade inga praktik-relevanta företag i {city}\n"
@@ -413,49 +555,35 @@ async def stad(interaction: discord.Interaction, city: str):
         )
         return
 
-    embed = discord.Embed(
-        title=f"📍 AI-företag i {city}",
-        description=f"Hittade {len(results)} praktik-relevanta företag",
-        color=discord.Color.orange()
-    )
-    embed.add_field(
-        name="ℹ️ Info",
-        value="Endast EU-företag (~20%) har location-data. my.ai.se-företag (80%) saknar stad.",
-        inline=False
-    )
-    for company in results[:5]:
-        description = company.get('description', '')[:100] + "..." if company.get('description') else ""
-        website = company['website'] if company['website'] else "(saknar hemsida)"
-        value = f"[{website}]({website})\n{description}\nTyp: {company['type']}" if company['website'] else f"{website}\n{description}\nTyp: {company['type']}"
-        embed.add_field(name=company['name'], value=value, inline=False)
-    if len(results) > 5:
-        embed.set_footer(text=f"Visar 5 av {len(results)} företag")
+    pages = chunk_list(results, 5)
 
-    await interaction.response.send_message(embed=embed)
+    def make_line(c, url):
+        desc = (c.get('description') or '')
+        desc = (desc[:100] + '...') if desc else ''
+        return f"{url}\n{desc}\nTyp: {c['type']}"
+
+    title = f"📍 AI-företag i {city}"
+    view = PagedResultsView(pages, title=title, make_field_line=make_line, user_id=interaction.user.id, color=discord.Color.orange())
+    await interaction.response.send_message(embed=view._embed_for_page(), view=view)
 
 
 @bot.tree.command(name="stockholm", description="Visa företag i Greater Stockholm")
 async def stockholm(interaction: discord.Interaction):
-    results = db.filter_greater_stockholm()
+    results = db.filter_greater_stockholm(limit=100)
     if not results:
         await interaction.response.send_message("❌ Hittade inga företag i Greater Stockholm", ephemeral=True)
         return
 
-    embed = discord.Embed(
-        title="🏙️ AI-företag i Greater Stockholm",
-        description=f"Hittade {len(results)} praktik-relevanta företag",
-        color=discord.Color.teal()
-    )
-    for company in results[:5]:
-        city = company.get('location_city', 'Stockholm')
-        description = company.get('description', '')[:100] + "..." if company.get('description') else ""
-        website = company['website'] if company['website'] else "(saknar hemsida)"
-        value = f"📍 {city}\n[{website}]({website})\n{description}" if company['website'] else f"📍 {city}\n{website}\n{description}"
-        embed.add_field(name=f"{company['name']} ({company['type']})", value=value, inline=False)
-    if len(results) > 5:
-        embed.set_footer(text=f"Visar 5 av {len(results)} företag")
+    pages = chunk_list(results, 5)
 
-    await interaction.response.send_message(embed=embed)
+    def make_line(c, url):
+        city = c.get('location_city', 'Stockholm')
+        desc = (c.get('description') or '')
+        desc = (desc[:100] + '...') if desc else ''
+        return f"📍 {city}\n{url}\n{desc}"
+
+    view = PagedResultsView(pages, title="🏙️ AI-företag i Greater Stockholm", make_field_line=make_line, user_id=interaction.user.id, color=discord.Color.teal())
+    await interaction.response.send_message(embed=view._embed_for_page(), view=view)
 
 # ==================== AUTOMATISK DAGLIG POSTING ====================
 
@@ -486,7 +614,7 @@ async def daily_company():
         return
     
     # Hämta dagens företag
-    company = db.get_random_company(only_praktik_relevant=True)
+    company = db.get_random_company_strict()
     
     if not company:
         await channel.send("❌ Kunde inte hitta dagens företag")

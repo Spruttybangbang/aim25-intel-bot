@@ -14,9 +14,11 @@ Kommandon:
 """
 
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 import sqlite3
 from datetime import datetime, time
+from zoneinfo import ZoneInfo
 import sys
 import os
 from pathlib import Path
@@ -236,7 +238,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 
-bot = commands.Bot(command_prefix='/', intents=intents, help_command=None)
+bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), intents=intents, help_command=None)
 
 # Global databas-instans
 db = CompanyDatabase()
@@ -259,6 +261,20 @@ async def on_ready():
         daily_company.start()
         print('✅ Daglig "Dagens AI-företag" är aktiv')
     
+    # Synca slash-kommandon (snabbt till en specifik guild om GUILD_ID finns)
+    try:
+        guild_id = os.getenv('GUILD_ID')
+        if guild_id:
+            guild = discord.Object(id=int(guild_id))
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            print(f'✅ Slash-kommandon synkade till guild {guild_id}: {len(synced)} st')
+        else:
+            synced = await bot.tree.sync()
+            print(f'✅ Globala slash-kommandon synkade: {len(synced)} st (kan ta upp till 1h att dyka upp)')
+    except Exception as e:
+        print(f'❌ Kunde inte synka slash-kommandon: {e}')
+    
     print(f'\n🤖 Bot är redo att användas!')
     print(f'💡 Använd /help för att se kommandon\n')
 
@@ -276,224 +292,174 @@ async def on_command_error(ctx, error):
 
 # ==================== BOT-KOMMANDON ====================
 
-@bot.command(name='help')
-async def help_command(ctx):
-    """Visa hjälp-meddelande"""
+
+@bot.tree.command(name="help", description="Visa hjälp och kommandon")
+async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🤖 AIM25 Intel Bot - Hjälp",
         description="Discord-bot för att hitta AI-företag och praktikplatser",
         color=discord.Color.blue()
     )
-    
     embed.add_field(
         name="📋 Kommandon",
         value=(
-            "`/dagens` - Dagens AI-företag (slumpmässigt praktik-relevant företag)\n"
-            "`/sok <namn>` - Sök efter företag (t.ex. `/sok Vision`)\n"
-            "`/typ <typ>` - Filtrera på typ (startup, corporation, supplier)\n"
-            "`/stad <stad>` - Hitta företag i specifik stad\n"
-            "`/stockholm` - Företag i Greater Stockholm\n"
-            "`/help` - Visa denna hjälp"
+            "/dagens – Dagens AI-företag (slumpmässigt praktik-relevant)\n"
+            "/sok <namn> – Sök efter företag\n"
+            "/typ <typ> – Filtrera på typ (startup, corporation, supplier)\n"
+            "/stad <stad> – Hitta företag i specifik stad\n"
+            "/stockholm – Företag i Greater Stockholm\n"
+            "/help – Visa denna hjälp"
         ),
         inline=False
     )
-    
     embed.add_field(
         name="⏰ Automatisk posting",
         value="Botten postar automatiskt 'Dagens AI-företag' kl 08:00 varje dag",
         inline=False
     )
-    
     embed.add_field(
         name="📊 Om datan",
         value="~900+ svenska AI-företag från my.ai.se och EU-källor",
         inline=False
     )
-    
     embed.set_footer(text="Projekt av ITHS AIM25S | För praktikjakt 🚀")
-    
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
-@bot.command(name='dagens')
-async def dagens(ctx):
-    """Dagens AI-företag - slumpmässigt praktik-relevant företag"""
+
+@bot.tree.command(name="dagens", description="Visa ett slumpmässigt praktik-relevant företag")
+async def dagens(interaction: discord.Interaction):
     company = db.get_random_company(only_praktik_relevant=True)
-    
     if not company:
-        await ctx.send("❌ Kunde inte hitta något företag. Kolla att databasen finns!")
+        await interaction.response.send_message("❌ Kunde inte hitta något företag. Kolla att databasen finns!", ephemeral=True)
         return
-    
-    # Skapa embed för snygg presentation
+
     embed = discord.Embed(
         title=f"🏢 {company['name']}",
         url=company['website'] if company['website'] else None,
         description=company['description'][:500] + "..." if company.get('description') and len(company.get('description', '')) > 500 else company.get('description', ''),
         color=discord.Color.green()
     )
-    
-    # Lägg till fält
     if company.get('website'):
         embed.add_field(name="🌐 Hemsida", value=company['website'], inline=False)
-    
     if company.get('location_city'):
         location = company['location_city']
         if company.get('location_greater_stockholm'):
             location += " (Greater Stockholm)"
         embed.add_field(name="📍 Plats", value=location, inline=True)
-    
     embed.add_field(name="📊 Typ", value=company['type'].capitalize(), inline=True)
-    
     if company.get('ai_capabilities'):
         ai_caps = ', '.join(company['ai_capabilities'][:3])
         embed.add_field(name="🤖 AI-förmågor", value=ai_caps, inline=False)
-    
-    # Lägg till logotyp om den finns
     if company.get('logo_url'):
         embed.set_thumbnail(url=company['logo_url'])
-    
     embed.set_footer(text=f"Dagens AI-företag • {datetime.now().strftime('%Y-%m-%d')}\nDetta är ett AI-genererat meddelande, dubbelkolla alltid viktig fakta")
-    
-    await ctx.send(embed=embed)
 
-@bot.command(name='sok')
-async def sok(ctx, *, search_term: str):
-    """
-    Sök efter företag
-    
-    Usage: /sok Vision
-    """
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="sok", description="Sök efter företag på namn")
+@app_commands.describe(search_term="Del av företagsnamn, t.ex. 'Vision'")
+async def sok(interaction: discord.Interaction, search_term: str):
     results = db.search_by_name(search_term)
-    
     if not results:
-        await ctx.send(f"❌ Hittade inga företag som matchar '{search_term}'")
+        await interaction.response.send_message(f"❌ Hittade inga företag som matchar '{search_term}'", ephemeral=True)
         return
-    
-    # Skapa embed
+
     embed = discord.Embed(
         title=f"🔍 Sökresultat för '{search_term}'",
         description=f"Hittade {len(results)} företag",
         color=discord.Color.blue()
     )
-    
     for i, company in enumerate(results, 1):
         location = f" - {company['location_city']}" if company.get('location_city') else ""
-        value = f"[{company['website']}]({company['website']}){location}\nTyp: {company['type']}"
-        embed.add_field(
-            name=f"{i}. {company['name']}",
-            value=value,
-            inline=False
-        )
-    
-    await ctx.send(embed=embed)
+        website = company['website'] if company['website'] else "(saknar hemsida)"
+        value = f"[{website}]({website}){location}\nTyp: {company['type']}" if company['website'] else f"{website}{location}\nTyp: {company['type']}"
+        embed.add_field(name=f"{i}. {company['name']}", value=value, inline=False)
 
-@bot.command(name='typ')
-async def typ(ctx, company_type: str):
-    """
-    Filtrera företag på typ
-    
-    Usage: /typ startup
-    Typer: startup, corporation, supplier, academia, etc.
-    """
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="typ", description="Filtrera företag på typ (startup, corporation, supplier)")
+@app_commands.describe(company_type="t.ex. 'startup', 'corporation', 'supplier'")
+async def typ(interaction: discord.Interaction, company_type: str):
     results = db.filter_by_type(company_type)
-    
     if not results:
-        await ctx.send(f"❌ Hittade inga företag av typ '{company_type}'\n💡 Prova: startup, corporation, supplier")
+        await interaction.response.send_message(f"❌ Hittade inga företag av typ '{company_type}'\n💡 Prova: startup, corporation, supplier", ephemeral=True)
         return
-    
-    # Skapa embed
+
     embed = discord.Embed(
         title=f"🏢 {company_type.capitalize()}",
         description=f"Visar {len(results)} företag",
         color=discord.Color.purple()
     )
-    
     for company in results:
         location = f" - {company['location_city']}" if company.get('location_city') else ""
-        embed.add_field(
-            name=company['name'] + location,
-            value=f"[{company['website']}]({company['website']})",
-            inline=False
-        )
-    
-    await ctx.send(embed=embed)
+        website = company['website'] if company['website'] else "(saknar hemsida)"
+        value = f"[{website}]({website})" if company['website'] else website
+        embed.add_field(name=company['name'] + location, value=value, inline=False)
 
-@bot.command(name='stad')
-async def stad(ctx, *, city: str):
-    """
-    Hitta företag i specifik stad
-    
-    Usage: /stad Stockholm
-    """
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="stad", description="Hitta praktik-relevanta företag i en stad")
+@app_commands.describe(city="t.ex. 'Stockholm'")
+async def stad(interaction: discord.Interaction, city: str):
     results = db.filter_by_city(city)
-    
     if not results:
-        await ctx.send(
+        await interaction.response.send_message(
             f"❌ Hittade inga praktik-relevanta företag i {city}\n"
-            f"⚠️ OBS: Endast ~20% av företagen har location-data (från EU-källa)"
+            f"⚠️ OBS: Endast ~20% av företagen har location-data (från EU-källa)",
+            ephemeral=True
         )
         return
-    
-    # Skapa embed
+
     embed = discord.Embed(
         title=f"📍 AI-företag i {city}",
         description=f"Hittade {len(results)} praktik-relevanta företag",
         color=discord.Color.orange()
     )
-    
     embed.add_field(
         name="ℹ️ Info",
         value="Endast EU-företag (~20%) har location-data. my.ai.se-företag (80%) saknar stad.",
         inline=False
     )
-    
-    for company in results[:5]:  # Visa max 5
+    for company in results[:5]:
         description = company.get('description', '')[:100] + "..." if company.get('description') else ""
-        value = f"[{company['website']}]({company['website']})\n{description}\nTyp: {company['type']}"
-        embed.add_field(
-            name=company['name'],
-            value=value,
-            inline=False
-        )
-    
+        website = company['website'] if company['website'] else "(saknar hemsida)"
+        value = f"[{website}]({website})\n{description}\nTyp: {company['type']}" if company['website'] else f"{website}\n{description}\nTyp: {company['type']}"
+        embed.add_field(name=company['name'], value=value, inline=False)
     if len(results) > 5:
         embed.set_footer(text=f"Visar 5 av {len(results)} företag")
-    
-    await ctx.send(embed=embed)
 
-@bot.command(name='stockholm')
-async def stockholm(ctx):
-    """Visa företag i Greater Stockholm-området"""
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="stockholm", description="Visa företag i Greater Stockholm")
+async def stockholm(interaction: discord.Interaction):
     results = db.filter_greater_stockholm()
-    
     if not results:
-        await ctx.send("❌ Hittade inga företag i Greater Stockholm")
+        await interaction.response.send_message("❌ Hittade inga företag i Greater Stockholm", ephemeral=True)
         return
-    
-    # Skapa embed
+
     embed = discord.Embed(
         title="🏙️ AI-företag i Greater Stockholm",
         description=f"Hittade {len(results)} praktik-relevanta företag",
         color=discord.Color.teal()
     )
-    
-    for company in results[:5]:  # Visa max 5
+    for company in results[:5]:
         city = company.get('location_city', 'Stockholm')
         description = company.get('description', '')[:100] + "..." if company.get('description') else ""
-        value = f"📍 {city}\n[{company['website']}]({company['website']})\n{description}"
-        embed.add_field(
-            name=f"{company['name']} ({company['type']})",
-            value=value,
-            inline=False
-        )
-    
+        website = company['website'] if company['website'] else "(saknar hemsida)"
+        value = f"📍 {city}\n[{website}]({website})\n{description}" if company['website'] else f"📍 {city}\n{website}\n{description}"
+        embed.add_field(name=f"{company['name']} ({company['type']})", value=value, inline=False)
     if len(results) > 5:
         embed.set_footer(text=f"Visar 5 av {len(results)} företag")
-    
-    await ctx.send(embed=embed)
+
+    await interaction.response.send_message(embed=embed)
 
 # ==================== AUTOMATISK DAGLIG POSTING ====================
 
-@tasks.loop(time=time(hour=8, minute=0))  # Kör kl 08:00 varje dag
+@tasks.loop(time=time(hour=8, minute=0, tzinfo=ZoneInfo("Europe/Stockholm")))  # Kör kl 08:00 varje dag (Stockholm-tid)
 async def daily_company():
     """
     Posta 'Dagens AI-företag' automatiskt varje dag kl 08:00
@@ -602,3 +568,12 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# ==================== SLASH-KOMMANDO ERROR HANDLER ====================
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    try:
+        await interaction.response.send_message(f"❌ Ett fel uppstod: {error}", ephemeral=True)
+    except discord.InteractionResponded:
+        await interaction.followup.send(f"❌ Ett fel uppstod: {error}", ephemeral=True)

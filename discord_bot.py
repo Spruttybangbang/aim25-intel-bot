@@ -351,7 +351,7 @@ async def dagens(ctx):
     if company.get('logo_url'):
         embed.set_thumbnail(url=company['logo_url'])
     
-    embed.set_footer(text=f"Dagens AI-företag • {datetime.now().strftime('%Y-%m-%d')}")
+    embed.set_footer(text=f"Dagens AI-företag • {datetime.now().strftime('%Y-%m-%d')}\nDetta är ett AI-genererat meddelande, dubbelkolla alltid viktig fakta")
     
     await ctx.send(embed=embed)
 
@@ -552,7 +552,7 @@ async def daily_company():
     if company.get('logo_url'):
         embed.set_thumbnail(url=company['logo_url'])
     
-    embed.set_footer(text=f"Dagens AI-företag • {datetime.now().strftime('%Y-%m-%d')} • Använd /help för fler kommandon")
+    embed.set_footer(text=f"Dagens AI-företag • {datetime.now().strftime('%Y-%m-%d')} • Använd /help för fler kommandon\nDetta är ett AI-genererat meddelande, dubbelkolla alltid viktig fakta")
     
     await channel.send(embed=embed)
     print(f"✅ Postade dagens företag: {company['name']}")

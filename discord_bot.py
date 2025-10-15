@@ -434,6 +434,22 @@ class PagedResultsView(discord.ui.View):
 def chunk_list(items: List[Dict], size: int) -> List[List[Dict]]:
     return [items[i:i+size] for i in range(0, len(items), size)]
 
+
+# ==================== AUTOCOMPLETE-CALLBACKS ====================
+async def ac_company_type(interaction: discord.Interaction, current: str):
+    try:
+        suggestions = db.suggest_types(current) if hasattr(db, 'suggest_types') else []
+        return [app_commands.Choice(name=t, value=t) for t in suggestions[:25]]
+    except Exception:
+        return []
+
+async def ac_city(interaction: discord.Interaction, current: str):
+    try:
+        suggestions = db.suggest_cities(current) if hasattr(db, 'suggest_cities') else []
+        return [app_commands.Choice(name=c, value=c) for c in suggestions[:25]]
+    except Exception:
+        return []
+
 # ==================== BOT-KOMMANDON ====================
 
 
@@ -525,7 +541,7 @@ async def sok(interaction: discord.Interaction, search_term: str):
 
 @bot.tree.command(name="typ", description="Filtrera företag på typ (startup, corporation, supplier)")
 @app_commands.describe(company_type="t.ex. 'startup', 'corporation', 'supplier'")
-@app_commands.autocomplete(company_type=lambda interaction, current: [app_commands.Choice(name=t, value=t) for t in db.suggest_types(current)][:25])
+@app_commands.autocomplete(company_type=ac_company_type)
 async def typ(interaction: discord.Interaction, company_type: str):
     # Hämta fler för paginering
     results = db.filter_by_type(company_type, limit=100)
@@ -544,7 +560,7 @@ async def typ(interaction: discord.Interaction, company_type: str):
 
 @bot.tree.command(name="stad", description="Hitta praktik-relevanta företag i en stad")
 @app_commands.describe(city="t.ex. 'Stockholm'")
-@app_commands.autocomplete(city=lambda interaction, current: [app_commands.Choice(name=c, value=c) for c in db.suggest_cities(current)][:25])
+@app_commands.autocomplete(city=ac_city)
 async def stad(interaction: discord.Interaction, city: str):
     results = db.filter_by_city(city, limit=100)
     if not results:

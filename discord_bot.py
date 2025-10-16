@@ -618,7 +618,7 @@ async def typ(interaction: discord.Interaction, company_type: str):
         desc = (desc[:250] + '...') if desc else ''
         embed.add_field(
             name=f"{i}. {c['name']}{city}",
-            value=f"{url}\nTyp: {c['type']}\n\n\n",
+            value=f"{url}\n{desc}\nTyp: {c['type']}\n\n\n",
             inline=False
         )
 

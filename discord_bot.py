@@ -391,7 +391,7 @@ async def on_command_error(ctx, error):
 # ==================== UI HELPERS (PAGINERING) ====================
 class PagedResultsView(discord.ui.View):
     def __init__(self, pages: List[List[Dict]], title: str, make_field_line, user_id: int, color: discord.Color = discord.Color.blurple()):
-        super().__init__(timeout=120)
+        super().__init__(timeout=604800)
         self.pages = pages
         self.index = 0
         self.title = title
@@ -448,7 +448,7 @@ class PagedResultsView(discord.ui.View):
 
 class SaveToDMView(discord.ui.View):
     def __init__(self, embed: discord.Embed, user_id: int):
-        super().__init__(timeout=60)
+        super().__init__(timeout=604800)
         self.embed = embed
         self.user_id = user_id
 

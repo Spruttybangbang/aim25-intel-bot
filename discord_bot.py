@@ -470,7 +470,7 @@ class DMEmbedForAnyoneView(discord.ui.View):
     Används för publika meddelanden som /dagens och den schemalagda posten.
     """
     def __init__(self, embed: discord.Embed):
-        super().__init__(timeout=120)
+        super().__init__(timeout=604800)
         self.embed = embed
 
     @discord.ui.button(label="💌 Skicka till mina DMs", style=discord.ButtonStyle.success)

@@ -445,6 +445,7 @@ class PagedResultsView(discord.ui.View):
             await interaction.response.send_message("❌ Jag kan inte skicka DM till dig. Aktivera DMs från servermedlemmar i dina inställningar.", ephemeral=True)
 
 
+
 class SaveToDMView(discord.ui.View):
     def __init__(self, embed: discord.Embed, user_id: int):
         super().__init__(timeout=60)
@@ -461,6 +462,27 @@ class SaveToDMView(discord.ui.View):
             await interaction.response.send_message("✅ Skickade till dina DMs.", ephemeral=True)
         except discord.Forbidden:
             await interaction.response.send_message("❌ Jag kan inte skicka DM till dig. Aktivera DMs från servermedlemmar i dina inställningar.", ephemeral=True)
+
+
+# --- Public DM button for embeds (for /dagens and daily post) ---
+class DMEmbedForAnyoneView(discord.ui.View):
+    """Knapp som skickar ett givet embed till den klickande användarens DMs.
+    Används för publika meddelanden som /dagens och den schemalagda posten.
+    """
+    def __init__(self, embed: discord.Embed):
+        super().__init__(timeout=120)
+        self.embed = embed
+
+    @discord.ui.button(label="💌 Skicka till mina DMs", style=discord.ButtonStyle.success)
+    async def send_dm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.user.send(embed=self.embed)
+            await interaction.response.send_message("✅ Jag skickade detta till dina DMs.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ Jag kan inte skicka DM till dig. Aktivera DMs från servermedlemmar i dina inställningar.",
+                ephemeral=True
+            )
 
 
 def chunk_list(items: List[Dict], size: int) -> List[List[Dict]]:
@@ -546,7 +568,7 @@ async def dagens(interaction: discord.Interaction):
         embed.set_thumbnail(url=company['logo_url'])
     embed.set_footer(text=f"Dagens AI-företag • {datetime.now().strftime('%Y-%m-%d')}\nDetta är ett AI-genererat meddelande, dubbelkolla alltid viktig fakta")
 
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed, view=DMEmbedForAnyoneView(embed))
 
 
 @bot.tree.command(name="sok", description="Sök efter företag på namn")
@@ -599,7 +621,7 @@ async def typ(interaction: discord.Interaction, company_type: str):
         )
 
     embed.set_footer(text="Tips: Kör kommandot igen för ett nytt slumpurval.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=SaveToDMView(embed, interaction.user.id), ephemeral=True)
 
 
 @bot.tree.command(name="stad", description="Hitta praktik-relevanta företag i en stad")
@@ -631,7 +653,7 @@ async def stad(interaction: discord.Interaction, city: str):
         )
 
     embed.set_footer(text="Tips: Kör kommandot igen för ett nytt slumpurval.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=SaveToDMView(embed, interaction.user.id), ephemeral=True)
 
 
 @bot.tree.command(name="stockholm", description="Visa företag i Greater Stockholm")
@@ -659,7 +681,7 @@ async def stockholm(interaction: discord.Interaction):
         )
 
     embed.set_footer(text="Tips: Kör kommandot igen för ett nytt slumpurval.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=SaveToDMView(embed, interaction.user.id), ephemeral=True)
 
 # ==================== AUTOMATISK DAGLIG POSTING ====================
 
@@ -724,7 +746,7 @@ async def daily_company():
     
     embed.set_footer(text=f"Dagens AI-företag • {datetime.now().strftime('%Y-%m-%d')} • Använd /help för fler kommandon\nDetta är ett AI-genererat meddelande, dubbelkolla alltid viktig fakta")
     
-    await channel.send(embed=embed)
+    await channel.send(embed=embed, view=DMEmbedForAnyoneView(embed))
     print(f"✅ Postade dagens företag: {company['name']}")
 
 @daily_company.before_loop

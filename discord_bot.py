@@ -618,7 +618,7 @@ async def typ(interaction: discord.Interaction, company_type: str):
         desc = (desc[:250] + '...') if desc else ''
         embed.add_field(
             name=f"{i}. {c['name']}{city}",
-            value=f"{url}\nTyp: {c['type']}\n\n",
+            value=f"{url}\nTyp: {c['type']}\n\n\n",
             inline=False
         )
 
@@ -650,7 +650,7 @@ async def stad(interaction: discord.Interaction, city: str):
         desc = (desc[:250] + '...') if desc else ''
         embed.add_field(
             name=f"{i}. {c['name']}",
-            value=f"{url}\n{desc}\nTyp: {c['type']}\n",
+            value=f"{url}\n{desc}\nTyp: {c['type']}\n\n",
             inline=False
         )
 

@@ -645,10 +645,10 @@ async def stad(interaction: discord.Interaction, city: str):
     for i, c in enumerate(results, 1):
         url = c['website']
         desc = (c.get('description') or '')
-        desc = (desc[:100] + '...') if desc else ''
+        desc = (desc[:250] + '...') if desc else ''
         embed.add_field(
             name=f"{i}. {c['name']}",
-            value=f"{url}\n{desc}\nTyp: {c['type']}",
+            value=f"{url}\n{desc}\nTyp: {c['type']}\n",
             inline=False
         )
 
@@ -673,10 +673,10 @@ async def stockholm(interaction: discord.Interaction):
         city = c.get('location_city', 'Stockholm')
         url = c['website']
         desc = (c.get('description') or '')
-        desc = (desc[:100] + '...') if desc else ''
+        desc = (desc[:250] + '...') if desc else ''
         embed.add_field(
             name=f"{i}. {c['name']} ({c['type']})",
-            value=f"📍 {city}\n{url}\n{desc}",
+            value=f"📍 {city}\n{url}\n{desc}\n\n",
             inline=False
         )
 

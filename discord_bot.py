@@ -242,7 +242,7 @@ class CompanyDatabase:
         cursor = self.conn.cursor()
         
         query = """
-        SELECT id, name, website, type, location_city
+        SELECT id, name, website, type, description, location_city
         FROM companies
         WHERE LOWER(type) = LOWER(?)
             AND website IS NOT NULL AND TRIM(website) <> ''
@@ -259,6 +259,7 @@ class CompanyDatabase:
                 'name': row['name'],
                 'website': row['website'],
                 'type': row['type'],
+                'description': row['description'],
                 'location_city': row['location_city']
             })
         

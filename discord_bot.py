@@ -430,6 +430,35 @@ class PagedResultsView(discord.ui.View):
         else:
             await interaction.response.defer()
 
+    @discord.ui.button(label="💌 Skicka till mina DMs", style=discord.ButtonStyle.success)
+    async def send_to_dm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Endast den som startade kommandot kan skicka detta till DMs.", ephemeral=True)
+            return
+        try:
+            await interaction.user.send(embed=self._embed_for_page())
+            await interaction.response.send_message("✅ Skickade denna sida till dina DMs.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ Jag kan inte skicka DM till dig. Aktivera DMs från servermedlemmar i dina inställningar.", ephemeral=True)
+
+
+class SaveToDMView(discord.ui.View):
+    def __init__(self, embed: discord.Embed, user_id: int):
+        super().__init__(timeout=60)
+        self.embed = embed
+        self.user_id = user_id
+
+    @discord.ui.button(label="💌 Skicka till mina DMs", style=discord.ButtonStyle.success)
+    async def send_dm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Endast den som startade kommandot kan skicka detta till DMs.", ephemeral=True)
+            return
+        try:
+            await interaction.user.send(embed=self.embed)
+            await interaction.response.send_message("✅ Skickade till dina DMs.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ Jag kan inte skicka DM till dig. Aktivera DMs från servermedlemmar i dina inställningar.", ephemeral=True)
+
 
 def chunk_list(items: List[Dict], size: int) -> List[List[Dict]]:
     return [items[i:i+size] for i in range(0, len(items), size)]
@@ -536,7 +565,7 @@ async def sok(interaction: discord.Interaction, search_term: str):
         value = f"{website}{location}\nTyp: {company['type']}"
         embed.add_field(name=f"{i}. {company['name']}", value=value, inline=False)
 
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed, view=SaveToDMView(embed, interaction.user.id), ephemeral=True)
 
 
 @bot.tree.command(name="typ", description="Filtrera företag på typ (startup, corporation, supplier)")
@@ -555,7 +584,7 @@ async def typ(interaction: discord.Interaction, company_type: str):
         return f"{url}\nTyp: {c['type']}"
 
     view = PagedResultsView(pages, title=f"🏢 {company_type.capitalize()}", make_field_line=make_line, user_id=interaction.user.id, color=discord.Color.purple())
-    await interaction.response.send_message(embed=view._embed_for_page(), view=view)
+    await interaction.response.send_message(embed=view._embed_for_page(), view=view, ephemeral=True)
 
 
 @bot.tree.command(name="stad", description="Hitta praktik-relevanta företag i en stad")
@@ -580,7 +609,7 @@ async def stad(interaction: discord.Interaction, city: str):
 
     title = f"📍 AI-företag i {city}"
     view = PagedResultsView(pages, title=title, make_field_line=make_line, user_id=interaction.user.id, color=discord.Color.orange())
-    await interaction.response.send_message(embed=view._embed_for_page(), view=view)
+    await interaction.response.send_message(embed=view._embed_for_page(), view=view, ephemeral=True)
 
 
 @bot.tree.command(name="stockholm", description="Visa företag i Greater Stockholm")

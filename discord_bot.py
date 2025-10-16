@@ -245,6 +245,7 @@ class CompanyDatabase:
         SELECT id, name, website, type, location_city
         FROM companies
         WHERE LOWER(type) = LOWER(?)
+            AND website IS NOT NULL AND TRIM(website) <> ''
         ORDER BY RANDOM()
         LIMIT ?
         """
@@ -274,8 +275,9 @@ class CompanyDatabase:
         SELECT id, name, website, type, description, location_city
         FROM companies
         WHERE location_city LIKE ?
-        AND type IN ('corporation', 'startup', 'supplier')
-        ORDER BY name
+            AND type IN ('corporation', 'startup', 'supplier')
+            AND website IS NOT NULL AND TRIM(website) <> ''
+        ORDER BY RANDOM()
         LIMIT ?
         """
         
@@ -305,8 +307,9 @@ class CompanyDatabase:
         SELECT id, name, website, type, description, location_city
         FROM companies
         WHERE location_greater_stockholm = 1
-        AND type IN ('corporation', 'startup', 'supplier')
-        ORDER BY name
+            AND type IN ('corporation', 'startup', 'supplier')
+            AND website IS NOT NULL AND TRIM(website) <> ''
+        ORDER BY RANDOM()
         LIMIT ?
         """
         
@@ -494,9 +497,9 @@ async def help_command(interaction: discord.Interaction):
         value=(
             "/dagens – Dagens AI-företag (slumpmässigt praktik-relevant)\n"
             "/sok <namn> – Sök efter företag\n"
-            "/typ <typ> – Filtrera på typ (startup, corporation, supplier)\n"
-            "/stad <stad> – Hitta företag i specifik stad\n"
-            "/stockholm – Företag i Greater Stockholm\n"
+            "/typ <typ> – Visar 5 slumpade företag av en typ\n"
+            "/stad <stad> – Visar 5 slumpade företag i en stad\n"
+            "/stockholm – Visar 5 slumpade företag i Greater Stockholm\n"
             "/help – Visa denna hjälp"
         ),
         inline=False
@@ -572,63 +575,91 @@ async def sok(interaction: discord.Interaction, search_term: str):
 @app_commands.describe(company_type="t.ex. 'startup', 'corporation', 'supplier'")
 @app_commands.autocomplete(company_type=ac_company_type)
 async def typ(interaction: discord.Interaction, company_type: str):
-    # Hämta fler för paginering
-    results = db.filter_by_type(company_type, limit=100)
+    results = db.filter_by_type(company_type, limit=5)
     if not results:
-        await interaction.response.send_message(f"❌ Hittade inga företag av typ '{company_type}'\n💡 Prova: startup, corporation, supplier", ephemeral=True)
+        await interaction.response.send_message(
+            f"❌ Hittade inga företag av typ '{company_type}' med hemsida",
+            ephemeral=True
+        )
         return
 
-    pages = chunk_list(results, 5)
+    embed = discord.Embed(
+        title=f"🏢 {company_type.capitalize()} (5 slumpade)",
+        description="Visar ett slumpvist urval av 5 företag som har hemsida.",
+        color=discord.Color.purple()
+    )
 
-    def make_line(c, url):
-        return f"{url}\nTyp: {c['type']}"
+    for i, c in enumerate(results, 1):
+        city = f" – {c['location_city']}" if c.get('location_city') else ""
+        url = c['website']
+        embed.add_field(
+            name=f"{i}. {c['name']}{city}",
+            value=f"{url}\nTyp: {c['type']}",
+            inline=False
+        )
 
-    view = PagedResultsView(pages, title=f"🏢 {company_type.capitalize()}", make_field_line=make_line, user_id=interaction.user.id, color=discord.Color.purple())
-    await interaction.response.send_message(embed=view._embed_for_page(), view=view, ephemeral=True)
+    embed.set_footer(text="Tips: Kör kommandot igen för ett nytt slumpurval.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="stad", description="Hitta praktik-relevanta företag i en stad")
 @app_commands.describe(city="t.ex. 'Stockholm'")
 @app_commands.autocomplete(city=ac_city)
 async def stad(interaction: discord.Interaction, city: str):
-    results = db.filter_by_city(city, limit=100)
+    results = db.filter_by_city(city, limit=5)
     if not results:
         await interaction.response.send_message(
-            f"❌ Hittade inga praktik-relevanta företag i {city}\n"
-            f"⚠️ OBS: Endast ~20% av företagen har location-data (från EU-källa)",
+            f"❌ Hittade inga praktik-relevanta företag med hemsida i {city}",
             ephemeral=True
         )
         return
 
-    pages = chunk_list(results, 5)
+    embed = discord.Embed(
+        title=f"📍 AI-företag i {city} (5 slumpade)",
+        description="Visar ett slumpvist urval av 5 företag som har hemsida.",
+        color=discord.Color.orange()
+    )
 
-    def make_line(c, url):
+    for i, c in enumerate(results, 1):
+        url = c['website']
         desc = (c.get('description') or '')
         desc = (desc[:100] + '...') if desc else ''
-        return f"{url}\n{desc}\nTyp: {c['type']}"
+        embed.add_field(
+            name=f"{i}. {c['name']}",
+            value=f"{url}\n{desc}\nTyp: {c['type']}",
+            inline=False
+        )
 
-    title = f"📍 AI-företag i {city}"
-    view = PagedResultsView(pages, title=title, make_field_line=make_line, user_id=interaction.user.id, color=discord.Color.orange())
-    await interaction.response.send_message(embed=view._embed_for_page(), view=view, ephemeral=True)
+    embed.set_footer(text="Tips: Kör kommandot igen för ett nytt slumpurval.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="stockholm", description="Visa företag i Greater Stockholm")
 async def stockholm(interaction: discord.Interaction):
-    results = db.filter_greater_stockholm(limit=100)
+    results = db.filter_greater_stockholm(limit=5)
     if not results:
-        await interaction.response.send_message("❌ Hittade inga företag i Greater Stockholm", ephemeral=True)
+        await interaction.response.send_message("❌ Hittade inga företag i Greater Stockholm med hemsida", ephemeral=True)
         return
 
-    pages = chunk_list(results, 5)
+    embed = discord.Embed(
+        title="🏙️ AI-företag i Greater Stockholm (5 slumpade)",
+        description="Visar ett slumpvist urval av 5 företag som har hemsida.",
+        color=discord.Color.teal()
+    )
 
-    def make_line(c, url):
+    for i, c in enumerate(results, 1):
         city = c.get('location_city', 'Stockholm')
+        url = c['website']
         desc = (c.get('description') or '')
         desc = (desc[:100] + '...') if desc else ''
-        return f"📍 {city}\n{url}\n{desc}"
+        embed.add_field(
+            name=f"{i}. {c['name']} ({c['type']})",
+            value=f"📍 {city}\n{url}\n{desc}",
+            inline=False
+        )
 
-    view = PagedResultsView(pages, title="🏙️ AI-företag i Greater Stockholm", make_field_line=make_line, user_id=interaction.user.id, color=discord.Color.teal())
-    await interaction.response.send_message(embed=view._embed_for_page(), view=view)
+    embed.set_footer(text="Tips: Kör kommandot igen för ett nytt slumpurval.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ==================== AUTOMATISK DAGLIG POSTING ====================
 

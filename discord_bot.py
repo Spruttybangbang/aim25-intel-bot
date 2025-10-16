@@ -614,9 +614,11 @@ async def typ(interaction: discord.Interaction, company_type: str):
     for i, c in enumerate(results, 1):
         city = f" – {c['location_city']}" if c.get('location_city') else ""
         url = c['website']
+        desc = (c.get('description') or '')
+        desc = (desc[:250] + '...') if desc else ''
         embed.add_field(
             name=f"{i}. {c['name']}{city}",
-            value=f"{url}\nTyp: {c['type']}",
+            value=f"{url}\nTyp: {c['type']}\n\n",
             inline=False
         )
 
